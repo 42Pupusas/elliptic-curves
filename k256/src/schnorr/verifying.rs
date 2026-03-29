@@ -1,6 +1,6 @@
 //! Taproot Schnorr verifying key.
 
-use super::{CHALLENGE_TAG, Signature, tagged_hash};
+use super::{Signature, tagged_hash_challenge};
 use crate::{AffinePoint, FieldBytes, ProjectivePoint, PublicKey, Scalar};
 use elliptic_curve::{
     group::prime::PrimeCurveAffine,
@@ -68,7 +68,7 @@ impl VerifyingKey {
         let (r, s) = signature.split();
 
         let e = <Scalar as Reduce<FieldBytes>>::reduce(
-            &tagged_hash(CHALLENGE_TAG)
+            &tagged_hash_challenge()
                 .chain_update(signature.r.to_bytes())
                 .chain_update(self.to_bytes())
                 .chain_update(message)
@@ -78,17 +78,20 @@ impl VerifyingKey {
         // When precomputed basepoint tables are available, split the computation
         // to use them for s*G (zero doublings needed) and standard GLV for (-e)*P.
         // Without tables, use Shamir's trick (lincomb) to share the doublings.
+        // Verification operates entirely on public data (signature + public key),
+        // so we use variable-time affine conversion to avoid unnecessary
+        // constant-time overhead in the field inversion.
         #[cfg(feature = "precomputed-tables")]
         let R = (ProjectivePoint::mul_by_generator(&**s)
             + self.inner.to_projective() * (-e))
-        .to_affine();
+        .to_affine_vartime();
 
         #[cfg(not(feature = "precomputed-tables"))]
         let R = ProjectivePoint::lincomb(&[
             (ProjectivePoint::GENERATOR, **s),
             (self.inner.to_projective(), -e),
         ])
-        .to_affine();
+        .to_affine_vartime();
 
         if R.is_identity().into() || R.y.normalize().is_odd().into() || R.x.normalize() != *r {
             return Err(Error::new());

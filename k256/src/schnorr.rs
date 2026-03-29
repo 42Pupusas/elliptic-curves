@@ -77,12 +77,34 @@ pub use signature::{self, Error, rand_core::CryptoRng};
 use crate::{FieldBytes, NonZeroScalar, arithmetic::FieldElement};
 use core::fmt;
 use elliptic_curve::subtle::ConstantTimeEq;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use signature::Result;
 
-const AUX_TAG: &[u8] = b"BIP0340/aux";
-const NONCE_TAG: &[u8] = b"BIP0340/nonce";
-const CHALLENGE_TAG: &[u8] = b"BIP0340/challenge";
+/// Pre-cached SHA256 midstates for BIP340 tagged hashes.
+///
+/// Per BIP340: "Implementations can obviously cache the midstate after hashing
+/// the tag." Each midstate is a SHA256 instance that has already processed
+/// `SHA256(tag) || SHA256(tag)`, ready for further data to be chained.
+#[cfg(feature = "std")]
+mod cached_midstates {
+    use sha2::{Digest, Sha256};
+    use std::sync::LazyLock;
+
+    fn compute_midstate(tag: &[u8]) -> Sha256 {
+        let tag_hash = Sha256::digest(tag);
+        let mut digest = Sha256::new();
+        digest.update(tag_hash);
+        digest.update(tag_hash);
+        digest
+    }
+
+    pub(super) static AUX: LazyLock<Sha256> =
+        LazyLock::new(|| compute_midstate(b"BIP0340/aux"));
+    pub(super) static NONCE: LazyLock<Sha256> =
+        LazyLock::new(|| compute_midstate(b"BIP0340/nonce"));
+    pub(super) static CHALLENGE: LazyLock<Sha256> =
+        LazyLock::new(|| compute_midstate(b"BIP0340/challenge"));
+}
 
 /// Taproot Schnorr signature serialized as bytes.
 pub type SignatureBytes = [u8; Signature::BYTE_SIZE];
@@ -210,12 +232,38 @@ impl signature::SignatureEncoding for Signature {
     }
 }
 
-fn tagged_hash(tag: &[u8]) -> Sha256 {
+/// Compute a BIP340 tagged hash from scratch.
+fn tagged_hash_compute(tag: &[u8]) -> Sha256 {
+    use sha2::Digest;
     let tag_hash = Sha256::digest(tag);
     let mut digest = Sha256::new();
     digest.update(tag_hash);
     digest.update(tag_hash);
     digest
+}
+
+/// Returns a SHA256 midstate for the AUX tag (cached when `std` is available).
+fn tagged_hash_aux() -> Sha256 {
+    #[cfg(feature = "std")]
+    { cached_midstates::AUX.clone() }
+    #[cfg(not(feature = "std"))]
+    { tagged_hash_compute(b"BIP0340/aux") }
+}
+
+/// Returns a SHA256 midstate for the NONCE tag (cached when `std` is available).
+fn tagged_hash_nonce() -> Sha256 {
+    #[cfg(feature = "std")]
+    { cached_midstates::NONCE.clone() }
+    #[cfg(not(feature = "std"))]
+    { tagged_hash_compute(b"BIP0340/nonce") }
+}
+
+/// Returns a SHA256 midstate for the CHALLENGE tag (cached when `std` is available).
+fn tagged_hash_challenge() -> Sha256 {
+    #[cfg(feature = "std")]
+    { cached_midstates::CHALLENGE.clone() }
+    #[cfg(not(feature = "std"))]
+    { tagged_hash_compute(b"BIP0340/challenge") }
 }
 
 // Test vectors from:

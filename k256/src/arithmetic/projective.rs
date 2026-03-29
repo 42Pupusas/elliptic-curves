@@ -78,6 +78,21 @@ impl ProjectivePoint {
             .unwrap_or_else(|| AffinePoint::IDENTITY)
     }
 
+    /// Returns the affine representation of this point, using variable-time
+    /// field inversion.
+    ///
+    /// # ⚠️  Warning
+    ///
+    /// This method's execution time may leak information about the Z-coordinate
+    /// through timing side-channels. Only use when the point is derived entirely
+    /// from public data (e.g. during signature verification).
+    pub fn to_affine_vartime(&self) -> AffinePoint {
+        self.z
+            .invert_vartime()
+            .map(|zinv| self.to_affine_internal(zinv))
+            .unwrap_or_else(|| AffinePoint::IDENTITY)
+    }
+
     pub(super) fn to_affine_internal(self, zinv: FieldElement) -> AffinePoint {
         let x = self.x * &zinv;
         let y = self.y * &zinv;

@@ -1,6 +1,6 @@
 //! Taproot Schnorr signing key.
 
-use super::{AUX_TAG, CHALLENGE_TAG, NONCE_TAG, Signature, VerifyingKey, tagged_hash};
+use super::{Signature, VerifyingKey, tagged_hash_aux, tagged_hash_challenge, tagged_hash_nonce};
 use crate::{
     AffinePoint, FieldBytes, NonZeroScalar, ProjectivePoint, PublicKey, Scalar, SecretKey,
 };
@@ -82,13 +82,13 @@ impl SigningKey {
     ///
     /// The preferred interfaces are the [`Signer`] or [`RandomizedSigner`] traits.
     pub fn sign_raw(&self, msg: &[u8], aux_rand: &[u8; 32]) -> Result<Signature> {
-        let mut t = tagged_hash(AUX_TAG).chain_update(aux_rand).finalize();
+        let mut t = tagged_hash_aux().chain_update(aux_rand).finalize();
 
         for (a, b) in t.iter_mut().zip(self.secret_key.to_bytes().iter()) {
             *a ^= b
         }
 
-        let rand = tagged_hash(NONCE_TAG)
+        let rand = tagged_hash_nonce()
             .chain_update(t)
             .chain_update(self.verifying_key.as_affine().x.to_bytes())
             .chain_update(msg)
@@ -104,7 +104,7 @@ impl SigningKey {
         let r = R.x.normalize();
 
         let e = <Scalar as Reduce<FieldBytes>>::reduce(
-            &tagged_hash(CHALLENGE_TAG)
+            &tagged_hash_challenge()
                 .chain_update(r.to_bytes())
                 .chain_update(self.verifying_key.to_bytes())
                 .chain_update(msg)
